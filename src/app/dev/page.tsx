@@ -4,7 +4,6 @@ import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useState } from "react";
-// import * as Sentry from "@sentry/nextjs";
 
 // client-side schema (keep in sync with server)
 const CourseFormSchema = z.object({
@@ -15,7 +14,15 @@ const CourseFormSchema = z.object({
   summary: z.string().min(10, "Summary must be at least 10 chars"),
 });
 
+// ✅ new: response schema (no any)
+const CourseResponseSchema = z.object({
+  ok: z.literal(true),
+  course: CourseFormSchema.extend({ id: z.string() }),
+});
+
 type CoursePayload = z.infer<typeof CourseFormSchema>;
+type CourseResponse = z.infer<typeof CourseResponseSchema>;
+type ServerError = { ok?: false; errors?: Record<string, string[] | string>; error?: string };
 
 export default function DevPage() {
   const [form, setForm] = useState<CoursePayload>({
@@ -25,26 +32,49 @@ export default function DevPage() {
   });
 
   const mutation = useMutation({
-    mutationFn: async (payload: CoursePayload) => {
+    mutationFn: async (payload: CoursePayload): Promise<CourseResponse> => {
       const res = await fetch("/api/courses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw data; // bubble server errors
-      return data as { ok: true; course: { id: string } & CoursePayload };
+
+      const data: unknown = await res.json();
+
+      if (!res.ok) {
+        // bubble server error; onError will narrow it
+        throw data;
+      }
+
+      // ✅ replace the any-casts with Zod validation
+      const parsed = CourseResponseSchema.safeParse(data);
+      if (!parsed.success) {
+        throw new Error("Unexpected response shape");
+      }
+      return parsed.data;
     },
+
     onSuccess: (data) => {
       toast.success("Course created", { description: `id: ${data.course.id}` });
       setForm({ title: "", slug: "", summary: "" });
     },
-    onError: (err: any) => {
-      const msg = err?.errors
-        ? Object.entries(err.errors)
-          .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`)
-          .join(" | ")
-        : "Unknown error";
+
+    onError: (err: unknown) => {
+      let msg = "Unknown error";
+
+      if (err instanceof Error) {
+        msg = err.message;
+      } else if (err && typeof err === "object") {
+        const maybe = err as ServerError;
+        if (maybe.errors) {
+          msg = Object.entries(maybe.errors)
+            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : String(v)}`)
+            .join(" | ");
+        } else if (typeof maybe.error === "string") {
+          msg = maybe.error;
+        }
+      }
+
       toast.error("Create failed", { description: msg });
     },
   });
@@ -93,9 +123,7 @@ export default function DevPage() {
             className="w-full border rounded px-3 py-2"
             rows={3}
             value={form.summary}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, summary: e.target.value }))
-            }
+            onChange={(e) => setForm((f) => ({ ...f, summary: e.target.value }))}
             placeholder="What learners will get from this course…"
           />
         </div>
@@ -107,14 +135,6 @@ export default function DevPage() {
         >
           {mutation.isPending ? "Creating…" : "Create course"}
         </button>
-
-        {/* <button
-          onClick={() => {
-            Sentry.captureException(new Error("Manual test from client"));
-          }}
-        >
-          Throw manual error
-        </button> */}
       </form>
     </main>
   );
