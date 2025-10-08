@@ -4,6 +4,7 @@ import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useState } from "react";
+// import * as Sentry from "@sentry/nextjs";
 
 // client-side schema (keep in sync with server)
 const CourseFormSchema = z.object({
@@ -41,8 +42,8 @@ export default function DevPage() {
     onError: (err: any) => {
       const msg = err?.errors
         ? Object.entries(err.errors)
-            .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`)
-            .join(" | ")
+          .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`)
+          .join(" | ")
         : "Unknown error";
       toast.error("Create failed", { description: msg });
     },
@@ -106,6 +107,14 @@ export default function DevPage() {
         >
           {mutation.isPending ? "Creating…" : "Create course"}
         </button>
+
+        {/* <button
+          onClick={() => {
+            Sentry.captureException(new Error("Manual test from client"));
+          }}
+        >
+          Throw manual error
+        </button> */}
       </form>
     </main>
   );
